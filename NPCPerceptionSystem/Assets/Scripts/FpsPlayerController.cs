@@ -7,8 +7,7 @@ public class FpsPlayerController : MonoBehaviour
     [Header("View")]
     [SerializeField] private Transform cameraPivot;
     [SerializeField] private float mouseSensitivity = 2.0f;
-    [Tooltip("Total pitch range is 180°, so clamp is +/- 90.")]
-    [SerializeField] private float maxPitch = 90f; // 180° total (up+down)
+    [SerializeField] private float maxPitch = 90f;
 
     [Header("Movement")]
     [SerializeField] private float moveSpeed = 5.0f;
@@ -23,6 +22,9 @@ public class FpsPlayerController : MonoBehaviour
 
     [Header("Cursor")]
     [SerializeField] private bool lockCursorOnPlay = true;
+
+    [Header("Debug")]
+    [SerializeField] private bool drawGroundCheckGizmo = true;
 
     private CharacterController controller = null!;
     private float pitch;
@@ -74,7 +76,6 @@ public class FpsPlayerController : MonoBehaviour
     {
         var checkPos = groundCheck ? groundCheck.position : transform.position;
         var sphereGrounded = Physics.CheckSphere(checkPos, groundCheckRadius, groundMask, QueryTriggerInteraction.Ignore);
-        // Also fall back to CharacterController's own ground flag to be safe.
         isGrounded = sphereGrounded || controller.isGrounded;
     }
 
@@ -115,6 +116,18 @@ public class FpsPlayerController : MonoBehaviour
 
         velocity.y += gravity * Time.deltaTime;
         controller.Move(velocity * Time.deltaTime);
+    }
+
+    private void OnDrawGizmos()
+    {
+        if (!drawGroundCheckGizmo)
+        {
+            return;
+        }
+
+        Vector3 checkPos = groundCheck ? groundCheck.position : transform.position;
+        Gizmos.color = new Color(0.25f, 0.95f, 1f, 0.5f);
+        Gizmos.DrawWireSphere(checkPos, groundCheckRadius);
     }
 }
 

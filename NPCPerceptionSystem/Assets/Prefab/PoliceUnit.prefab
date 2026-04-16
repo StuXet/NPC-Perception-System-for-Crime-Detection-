@@ -50,6 +50,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e8ace6e3391041d48a43cbc46dda9e54, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  crimeArrivalTolerance: 1.75
+  chasePathRefreshInterval: 0.2
+  arrestDistance: 1.8
+  bustedScreen: {fileID: 0}
   debugLogs: 1
 --- !u!33 &5320231529439861526
 MeshFilter:

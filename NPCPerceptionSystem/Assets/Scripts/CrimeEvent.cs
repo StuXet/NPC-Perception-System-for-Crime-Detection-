@@ -16,8 +16,9 @@ public struct CrimeEvent
     public Transform reporter;
     public float timestamp;
     public float soundRadius;
+    public bool directPolicePursuit;
 
-    public CrimeEvent(Vector3 location, CrimeType type, Transform suspect, float soundRadius = 10f)
+    public CrimeEvent(Vector3 location, CrimeType type, Transform suspect, float soundRadius = 10f, bool directPolicePursuit = false)
     {
         this.location = location;
         this.type = type;
@@ -25,5 +26,6 @@ public struct CrimeEvent
         this.reporter = null;
         this.timestamp = Time.time;
         this.soundRadius = soundRadius;
+        this.directPolicePursuit = directPolicePursuit;
     }
 }
