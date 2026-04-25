@@ -42,7 +42,12 @@ public class NPCWander : MonoBehaviour
     /// </summary>
     private void Update()
     {
-        if (agent.isStopped || !agent.isOnNavMesh)
+        if (!agent || !agent.enabled || !agent.isOnNavMesh)
+        {
+            return;
+        }
+
+        if (agent.isStopped)
         {
             return;
         }

@@ -37,10 +37,17 @@ public class PunchHitReceiver : MonoBehaviour
     private NavMeshAgent navAgent;
     private Coroutine activeRoutine;
     private NPCPoliceCallCountdown policeCallCountdown;
+    private ActorHealth actorHealth;
 
     private void Awake()
     {
         navAgent = GetComponent<NavMeshAgent>();
+        actorHealth = GetComponent<ActorHealth>();
+        if (!actorHealth)
+        {
+            actorHealth = GetComponentInParent<ActorHealth>();
+        }
+
         policeCallCountdown = GetComponent<NPCPoliceCallCountdown>();
         if (!policeCallCountdown)
         {
@@ -50,6 +57,11 @@ public class PunchHitReceiver : MonoBehaviour
 
     public void ReceivePunch(Vector3 attackerWorldPosition, Transform attacker)
     {
+        if (actorHealth && actorHealth.IsDead)
+        {
+            return;
+        }
+
         if (activeRoutine != null)
         {
             StopCoroutine(activeRoutine);
@@ -75,8 +87,20 @@ public class PunchHitReceiver : MonoBehaviour
 
         yield return PunchRoutine(knockbackDir);
 
+        if (actorHealth && actorHealth.IsDead)
+        {
+            activeRoutine = null;
+            yield break;
+        }
+
         Vector3 puncherPosition = attacker ? attacker.position : attackerWorldPosition;
         yield return SmoothRotateTowardsHorizontal(puncherPosition);
+
+        if (actorHealth && actorHealth.IsDead)
+        {
+            activeRoutine = null;
+            yield break;
+        }
 
         if (reportAssaultToPolice && attacker && CrimeManager.Instance != null)
         {
@@ -180,9 +204,13 @@ public class PunchHitReceiver : MonoBehaviour
                 transform.position = navHit.position;
             }
 
-            navAgent.enabled = true;
-            navAgent.Warp(transform.position);
-            navAgent.isStopped = false;
+            // Don't revive NavMesh control if this actor died during punch sequence.
+            if (!(actorHealth && actorHealth.IsDead))
+            {
+                navAgent.enabled = true;
+                navAgent.Warp(transform.position);
+                navAgent.isStopped = false;
+            }
         }
 
         yield return flashCo;

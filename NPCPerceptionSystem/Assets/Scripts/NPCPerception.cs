@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -25,14 +26,21 @@ public class NPCPerception : MonoBehaviour
     [SerializeField] private float hearingMoveStopDistance = 1.5f;
     [SerializeField] private float hearingInvestigateRadius = 3f;
     [SerializeField] private float hearingInvestigatePointInterval = 0.8f;
+    [SerializeField] private float deadBodySightHeightOffset = 0.8f;
+    [SerializeField] private float deadBodyConfirmDistance = 2.0f;
+    [SerializeField] private bool enableDeadBodyAutoScan = true;
+    [SerializeField] private float deadBodyScanInterval = 0.5f;
 
     [Header("Debug")]
     [SerializeField] private bool debugLogs = true;
     [SerializeField] private bool drawGizmos = true;
 
     private float nextAllowedReportTime;
+    private float nextDeadBodyScanTime;
     private Coroutine hearingRoutine;
     private NavMeshAgent navAgent;
+    private readonly HashSet<int> reportedDeadBodyIds = new HashSet<int>();
+    private bool holdPositionUntilReportSent;
 
     private void Reset()
     {
@@ -68,6 +76,8 @@ public class NPCPerception : MonoBehaviour
         {
             navAgent.isStopped = false;
         }
+
+        holdPositionUntilReportSent = false;
     }
 
     /// <summary>
@@ -75,7 +85,41 @@ public class NPCPerception : MonoBehaviour
     /// </summary>
     private void HandleCrimeCommitted(CrimeEvent committedCrime)
     {
-        if (!target || CrimeManager.Instance == null)
+        if (holdPositionUntilReportSent)
+        {
+            return;
+        }
+
+        if (CrimeManager.Instance == null)
+        {
+            return;
+        }
+
+        bool isDeadBodyEvent = committedCrime.type == CrimeType.DeadBody;
+        if (isDeadBodyEvent)
+        {
+            Vector3 deadBodySightPoint = GetDeadBodySightPoint(committedCrime);
+            if (!CanSeePoint(deadBodySightPoint, committedCrime.suspect))
+            {
+                if (!CanHearCrime(committedCrime))
+                {
+                    return;
+                }
+
+                if (hearingRoutine != null)
+                {
+                    StopCoroutine(hearingRoutine);
+                }
+
+                hearingRoutine = StartCoroutine(InvestigateDeadBodyThenCheck(committedCrime));
+                return;
+            }
+
+            ReportWitnessedCrime(committedCrime, "DeadBodySight");
+            return;
+        }
+
+        if (!target)
         {
             return;
         }
@@ -111,6 +155,22 @@ public class NPCPerception : MonoBehaviour
             StopCoroutine(hearingRoutine);
         }
         hearingRoutine = StartCoroutine(LookTowardCrimeThenCheck(committedCrime));
+    }
+
+    private void Update()
+    {
+        if (holdPositionUntilReportSent)
+        {
+            return;
+        }
+
+        if (!enableDeadBodyAutoScan || Time.time < nextDeadBodyScanTime)
+        {
+            return;
+        }
+
+        nextDeadBodyScanTime = Time.time + Mathf.Max(0.1f, deadBodyScanInterval);
+        ScanForVisibleDeadBodies();
     }
 
     private bool CanHearCrime(CrimeEvent committedCrime)
@@ -171,6 +231,90 @@ public class NPCPerception : MonoBehaviour
         }
 
         yield return RotateAndCheckFromCurrentPosition(committedCrime);
+    }
+
+    private IEnumerator InvestigateDeadBodyThenCheck(CrimeEvent committedCrime)
+    {
+        if (moveToHeardCrime && navAgent && navAgent.isOnNavMesh)
+        {
+            navAgent.isStopped = false;
+            navAgent.SetDestination(committedCrime.location);
+
+            float endTime = Time.time + hearingInvestigationDuration;
+            float nextInvestigatePointTime = Time.time;
+
+            while (Time.time < endTime)
+            {
+                Vector3 deadBodySightPoint = GetDeadBodySightPoint(committedCrime);
+                bool closeEnoughToConfirm =
+                    Vector3.Distance(transform.position, committedCrime.location) <= deadBodyConfirmDistance;
+
+                if (CanSeePoint(deadBodySightPoint, committedCrime.suspect) || closeEnoughToConfirm)
+                {
+                    StopNavMovement();
+                    yield return RotateTowardsPointBeforeReport(deadBodySightPoint);
+                    ReportWitnessedCrime(committedCrime, "DeadBodyInvestigate");
+                    hearingRoutine = null;
+                    yield break;
+                }
+
+                bool arrived = !navAgent.pathPending &&
+                               (!navAgent.hasPath || navAgent.remainingDistance <= hearingMoveStopDistance);
+                if (arrived && Time.time >= nextInvestigatePointTime)
+                {
+                    SetRandomInvestigationPoint(committedCrime.location);
+                    nextInvestigatePointTime = Time.time + hearingInvestigatePointInterval;
+                }
+
+                yield return null;
+            }
+        }
+        else
+        {
+            yield return RotateTowardsPointBeforeReport(GetDeadBodySightPoint(committedCrime));
+        }
+
+        Vector3 finalDeadBodySightPoint = GetDeadBodySightPoint(committedCrime);
+        bool finalCloseEnough =
+            Vector3.Distance(transform.position, committedCrime.location) <= deadBodyConfirmDistance;
+
+        if (CanSeePoint(finalDeadBodySightPoint, committedCrime.suspect) || finalCloseEnough)
+        {
+            ReportWitnessedCrime(committedCrime, "DeadBodyInvestigate");
+        }
+        else if (debugLogs)
+        {
+            Debug.Log($"[NPCPerception] '{name}' investigated dead body scene but did not confirm visual.");
+        }
+
+        hearingRoutine = null;
+    }
+
+    private Vector3 GetDeadBodySightPoint(CrimeEvent committedCrime)
+    {
+        Vector3 basePos = committedCrime.location;
+        if (committedCrime.suspect)
+        {
+            basePos = GetDeadBodySightPointFromTransform(committedCrime.suspect);
+        }
+
+        return basePos + Vector3.up * deadBodySightHeightOffset;
+    }
+
+    private Vector3 GetDeadBodySightPointFromTransform(Transform bodyTransform)
+    {
+        if (!bodyTransform)
+        {
+            return Vector3.zero;
+        }
+
+        Collider bodyCollider = bodyTransform.GetComponentInChildren<Collider>();
+        if (bodyCollider)
+        {
+            return bodyCollider.bounds.center;
+        }
+
+        return bodyTransform.position;
     }
 
     /// <summary>
@@ -288,6 +432,39 @@ public class NPCPerception : MonoBehaviour
         }
     }
 
+    private IEnumerator RotateTowardsPointBeforeReport(Vector3 reportPoint)
+    {
+        Vector3 flatDirection = reportPoint - transform.position;
+        flatDirection.y = 0f;
+        if (flatDirection.sqrMagnitude <= 0.0001f)
+        {
+            yield break;
+        }
+
+        if (navAgent)
+        {
+            navAgent.isStopped = true;
+        }
+
+        try
+        {
+            Quaternion targetRotation = Quaternion.LookRotation(flatDirection.normalized);
+            while (Quaternion.Angle(transform.rotation, targetRotation) > 1f)
+            {
+                float step = lookTurnSpeed * Time.deltaTime;
+                transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, step);
+                yield return null;
+            }
+        }
+        finally
+        {
+            if (navAgent)
+            {
+                navAgent.isStopped = false;
+            }
+        }
+    }
+
     private void StopNavMovement()
     {
         if (!navAgent || !navAgent.isOnNavMesh)
@@ -307,6 +484,12 @@ public class NPCPerception : MonoBehaviour
         CrimeEvent crime = committedCrime;
         // Immediate line-of-sight reports should make police chase right away.
         crime.directPolicePursuit = reason == "Sight";
+        bool holdForDeadBodyReport = crime.type == CrimeType.DeadBody;
+
+        if (holdForDeadBodyReport)
+        {
+            BeginHoldAtSceneForReport();
+        }
 
         if (TryGetComponent<NPCPoliceCallCountdown>(out NPCPoliceCallCountdown callDelay))
         {
@@ -321,6 +504,10 @@ public class NPCPerception : MonoBehaviour
         {
             CrimeManager.Instance.ReportCrime(crime, transform);
             nextAllowedReportTime = Time.time + reportCooldown;
+            if (holdForDeadBodyReport)
+            {
+                EndHoldAtSceneAfterReport();
+            }
 
             if (debugLogs)
             {
@@ -332,6 +519,27 @@ public class NPCPerception : MonoBehaviour
     public void NotifyReportSentToPolice()
     {
         nextAllowedReportTime = Time.time + reportCooldown;
+
+        if (holdPositionUntilReportSent)
+        {
+            EndHoldAtSceneAfterReport();
+        }
+    }
+
+    private void BeginHoldAtSceneForReport()
+    {
+        holdPositionUntilReportSent = true;
+        StopNavMovement();
+    }
+
+    private void EndHoldAtSceneAfterReport()
+    {
+        holdPositionUntilReportSent = false;
+
+        if (navAgent && navAgent.enabled && navAgent.isOnNavMesh)
+        {
+            navAgent.isStopped = false;
+        }
     }
 
     /// <summary>
@@ -369,6 +577,89 @@ public class NPCPerception : MonoBehaviour
         }
 
         return true;
+    }
+
+    private bool CanSeePoint(Vector3 worldPoint, Transform allowedHit = null)
+    {
+        Vector3 eye = eyePoint ? eyePoint.position : transform.position;
+        Vector3 toPoint = worldPoint - eye;
+        float sqrDistance = toPoint.sqrMagnitude;
+        float maxSqrDistance = viewDistance * viewDistance;
+
+        if (sqrDistance > maxSqrDistance)
+        {
+            return false;
+        }
+
+        Vector3 directionToPoint = toPoint.normalized;
+        float halfFov = viewAngle * 0.5f;
+        float angle = Vector3.Angle(transform.forward, directionToPoint);
+        if (angle > halfFov)
+        {
+            return false;
+        }
+
+        if (!useLineOfSight)
+        {
+            return true;
+        }
+
+        float distance = Mathf.Sqrt(sqrDistance);
+        if (Physics.Raycast(eye, directionToPoint, out RaycastHit hit, distance, obstructionMask, QueryTriggerInteraction.Ignore))
+        {
+            if (hit.transform == transform || hit.transform.IsChildOf(transform))
+            {
+                return true;
+            }
+
+            if (allowedHit && (hit.transform == allowedHit || hit.transform.IsChildOf(allowedHit)))
+            {
+                return true;
+            }
+
+            // Consider dead body scene visible if nothing blocks the view before the point.
+            return hit.distance + 0.05f >= distance;
+        }
+
+        return true;
+    }
+
+    private void ScanForVisibleDeadBodies()
+    {
+        Vector3 eye = eyePoint ? eyePoint.position : transform.position;
+        Collider[] nearby = Physics.OverlapSphere(eye, viewDistance, ~0, QueryTriggerInteraction.Ignore);
+
+        for (int i = 0; i < nearby.Length; i++)
+        {
+            ActorHealth health = nearby[i].GetComponentInParent<ActorHealth>();
+            if (!health || !health.IsDead)
+            {
+                continue;
+            }
+
+            int bodyId = health.GetInstanceID();
+            if (reportedDeadBodyIds.Contains(bodyId))
+            {
+                continue;
+            }
+
+            Transform bodyTransform = health.transform;
+            Vector3 bodySightPoint = GetDeadBodySightPointFromTransform(bodyTransform) + Vector3.up * deadBodySightHeightOffset;
+
+            if (!CanSeePoint(bodySightPoint, bodyTransform))
+            {
+                continue;
+            }
+
+            CrimeEvent deadBodyCrime = new CrimeEvent(bodyTransform.position, CrimeType.DeadBody, bodyTransform, hearingDistance);
+            ReportWitnessedCrime(deadBodyCrime, "DeadBodyAutoSight");
+            reportedDeadBodyIds.Add(bodyId);
+
+            if (debugLogs)
+            {
+                Debug.Log($"[NPCPerception] '{name}' visually discovered dead body '{bodyTransform.name}' while scanning.");
+            }
+        }
     }
 
     private void OnDrawGizmosSelected()

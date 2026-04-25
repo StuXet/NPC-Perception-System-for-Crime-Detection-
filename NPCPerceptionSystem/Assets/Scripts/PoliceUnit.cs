@@ -9,6 +9,7 @@ public class PoliceUnit : MonoBehaviour
     {
         Idle,
         GoingToCrime,
+        InvestigatingScene,
         ChasingSuspect
     }
 
@@ -19,17 +20,32 @@ public class PoliceUnit : MonoBehaviour
     [SerializeField] private float chasePathRefreshInterval = 0.2f;
     [SerializeField] private float arrestDistance = 1.25f;
 
+    [Header("Investigation")]
+    [SerializeField] private float investigationDurationSeconds = 8f;
+    [SerializeField] private float investigatePointInterval = 1.0f;
+    [SerializeField] private float investigationViewDistance = 14f;
+    [SerializeField, Range(1f, 180f)] private float investigationViewAngle = 100f;
+    [SerializeField] private LayerMask investigationObstructionMask = ~0;
+
+    [Header("References")]
+    [SerializeField] private Transform playerTarget;
+
     [Header("Arrest UI")]
     [SerializeField] private BustedScreenController bustedScreen;
 
     [Header("Debug")]
     [SerializeField] private bool debugLogs = true;
+    [SerializeField] private bool drawGizmos = true;
 
     private NavMeshAgent agent;
     private UnitState state = UnitState.Idle;
     private Vector3 crimeLocation;
     private Transform suspect;
     private float nextChasePathTime;
+    private float investigationEndTime;
+    private float nextInvestigatePointTime;
+    private float investigationRadius;
+    private CrimeType currentCrimeType;
     private bool arrestTriggered;
 
     private void Awake()
@@ -38,6 +54,15 @@ public class PoliceUnit : MonoBehaviour
         if (!bustedScreen)
         {
             bustedScreen = FindObjectOfType<BustedScreenController>();
+        }
+
+        if (!playerTarget)
+        {
+            GameObject player = GameObject.FindGameObjectWithTag("Player");
+            if (player)
+            {
+                playerTarget = player.transform;
+            }
         }
     }
 
@@ -48,6 +73,8 @@ public class PoliceUnit : MonoBehaviour
     {
         crimeLocation = reportedCrime.location;
         suspect = reportedCrime.suspect;
+        currentCrimeType = reportedCrime.type;
+        investigationRadius = Mathf.Max(2f, reportedCrime.soundRadius);
         nextChasePathTime = 0f;
         arrestTriggered = false;
         agent.isStopped = false;
@@ -91,6 +118,9 @@ public class PoliceUnit : MonoBehaviour
             case UnitState.GoingToCrime:
                 UpdateGoingToCrime();
                 break;
+            case UnitState.InvestigatingScene:
+                UpdateInvestigatingScene();
+                break;
             case UnitState.ChasingSuspect:
                 UpdateChasingSuspect();
                 break;
@@ -121,6 +151,12 @@ public class PoliceUnit : MonoBehaviour
             Debug.Log($"[PoliceUnit] '{name}' arrived at crime area. dist={dist:F2}");
         }
 
+        if (currentCrimeType == CrimeType.DeadBody)
+        {
+            StartInvestigatingScene();
+            return;
+        }
+
         if (suspect)
         {
             // We made it to the scene and still know who to chase.
@@ -140,6 +176,54 @@ public class PoliceUnit : MonoBehaviour
             {
                 Debug.Log($"[PoliceUnit] '{name}' no suspect to chase; holding position.");
             }
+        }
+    }
+
+    private void StartInvestigatingScene()
+    {
+        state = UnitState.InvestigatingScene;
+        float duration = Mathf.Max(0.5f, investigationDurationSeconds);
+        investigationEndTime = Time.time + duration;
+        nextInvestigatePointTime = 0f;
+        PickInvestigationPoint();
+
+        if (debugLogs)
+        {
+            Debug.Log($"[PoliceUnit] '{name}' investigating dead-body scene for {duration:0.##}s in radius {investigationRadius:0.##}.");
+        }
+    }
+
+    private void UpdateInvestigatingScene()
+    {
+        if (CanSeePlayerInInvestigationRadius(out Transform seenPlayer))
+        {
+            suspect = seenPlayer;
+            state = UnitState.ChasingSuspect;
+            RefreshChaseDestination(true);
+
+            if (debugLogs)
+            {
+                Debug.Log($"[PoliceUnit] '{name}' saw player in crime scene radius and assumes killer.");
+            }
+            return;
+        }
+
+        if (Time.time >= investigationEndTime)
+        {
+            state = UnitState.Idle;
+            agent.ResetPath();
+
+            if (debugLogs)
+            {
+                Debug.Log($"[PoliceUnit] '{name}' finished investigation without identifying killer.");
+            }
+            return;
+        }
+
+        bool arrived = !agent.pathPending && (!agent.hasPath || agent.remainingDistance <= agent.stoppingDistance);
+        if (arrived && Time.time >= nextInvestigatePointTime)
+        {
+            PickInvestigationPoint();
         }
     }
 
@@ -219,5 +303,108 @@ public class PoliceUnit : MonoBehaviour
 
         agent.SetDestination(targetPos);
         nextChasePathTime = Time.time + (immediate ? 0f : chasePathRefreshInterval);
+    }
+
+    private void PickInvestigationPoint()
+    {
+        Vector2 offset = Random.insideUnitCircle * investigationRadius;
+        Vector3 candidate = crimeLocation + new Vector3(offset.x, 0f, offset.y);
+
+        if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, investigationRadius, NavMesh.AllAreas))
+        {
+            agent.SetDestination(hit.position);
+        }
+        else
+        {
+            agent.SetDestination(crimeLocation);
+        }
+
+        nextInvestigatePointTime = Time.time + investigatePointInterval;
+    }
+
+    private bool CanSeePlayerInInvestigationRadius(out Transform seenPlayer)
+    {
+        seenPlayer = null;
+
+        Transform player = playerTarget ? playerTarget : suspect;
+        if (!player)
+        {
+            return false;
+        }
+
+        // Player must be inside crime-scene radius to be assumed killer during this phase.
+        if (Vector3.Distance(player.position, crimeLocation) > investigationRadius)
+        {
+            return false;
+        }
+
+        Vector3 eye = transform.position + Vector3.up * 1.2f;
+        Vector3 toPlayer = player.position - eye;
+        float sqrDist = toPlayer.sqrMagnitude;
+        if (sqrDist > investigationViewDistance * investigationViewDistance)
+        {
+            return false;
+        }
+
+        float angle = Vector3.Angle(transform.forward, toPlayer.normalized);
+        if (angle > investigationViewAngle * 0.5f)
+        {
+            return false;
+        }
+
+        float dist = Mathf.Sqrt(sqrDist);
+        if (Physics.Raycast(eye, toPlayer.normalized, out RaycastHit hit, dist, investigationObstructionMask, QueryTriggerInteraction.Ignore))
+        {
+            if (hit.transform != player && !hit.transform.IsChildOf(player))
+            {
+                return false;
+            }
+        }
+
+        seenPlayer = player;
+        return true;
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        if (!drawGizmos)
+        {
+            return;
+        }
+
+        Vector3 eye = transform.position + Vector3.up * 1.2f;
+        float halfFov = investigationViewAngle * 0.5f;
+
+        // Police investigation vision range.
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireSphere(eye, investigationViewDistance);
+
+        Vector3 leftBoundary = Quaternion.Euler(0f, -halfFov, 0f) * transform.forward;
+        Vector3 rightBoundary = Quaternion.Euler(0f, halfFov, 0f) * transform.forward;
+        Gizmos.color = Color.cyan;
+        Gizmos.DrawLine(eye, eye + leftBoundary * investigationViewDistance);
+        Gizmos.DrawLine(eye, eye + rightBoundary * investigationViewDistance);
+
+        // Arrest radius around police.
+        Gizmos.color = Color.red;
+        Gizmos.DrawWireSphere(transform.position, arrestDistance);
+
+        // Active crime scene investigation radius.
+        if (investigationRadius > 0.01f)
+        {
+            Gizmos.color = new Color(1f, 0.5f, 0f, 0.95f);
+            Gizmos.DrawWireSphere(crimeLocation, investigationRadius);
+        }
+
+        // Debug line to tracked target (player/suspect), color-coded by visibility.
+        Transform tracked = playerTarget ? playerTarget : suspect;
+        if (tracked)
+        {
+            Vector3 toTracked = tracked.position - eye;
+            bool inDistance = toTracked.sqrMagnitude <= investigationViewDistance * investigationViewDistance;
+            bool inAngle = Vector3.Angle(transform.forward, toTracked.normalized) <= halfFov;
+            Gizmos.color = (inDistance && inAngle) ? Color.green : Color.gray;
+            Gizmos.DrawLine(eye, tracked.position);
+        }
     }
 }

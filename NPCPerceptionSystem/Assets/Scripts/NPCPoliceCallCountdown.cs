@@ -13,14 +13,20 @@ public class NPCPoliceCallCountdown : MonoBehaviour
     private Coroutine countdownRoutine;
     private CrimeEvent pendingCrime;
     private string pendingReason = string.Empty;
+    private ActorHealth cachedHealth;
+
+    private void Awake()
+    {
+        cachedHealth = GetComponent<ActorHealth>();
+        if (!cachedHealth)
+        {
+            cachedHealth = GetComponentInParent<ActorHealth>();
+        }
+    }
 
     private void OnDisable()
     {
-        if (countdownRoutine != null)
-        {
-            StopCoroutine(countdownRoutine);
-            countdownRoutine = null;
-        }
+        CancelPendingCall();
     }
 
     /// <summary>
@@ -28,6 +34,11 @@ public class NPCPoliceCallCountdown : MonoBehaviour
     /// </summary>
     public void SchedulePoliceCall(CrimeEvent crime, string reason = "")
     {
+        if (cachedHealth && cachedHealth.IsDead)
+        {
+            return;
+        }
+
         pendingCrime = crime;
         pendingReason = reason;
 
@@ -45,12 +56,27 @@ public class NPCPoliceCallCountdown : MonoBehaviour
         }
     }
 
+    public void CancelPendingCall()
+    {
+        if (countdownRoutine != null)
+        {
+            StopCoroutine(countdownRoutine);
+            countdownRoutine = null;
+        }
+    }
+
     /// <summary>
     /// Waits configured delay, reports pending crime, then notifies perception cooldown state.
     /// </summary>
     private IEnumerator CountdownRoutine()
     {
         yield return new WaitForSeconds(callDelaySeconds);
+
+        if (cachedHealth && cachedHealth.IsDead)
+        {
+            countdownRoutine = null;
+            yield break;
+        }
 
         if (CrimeManager.Instance != null)
         {

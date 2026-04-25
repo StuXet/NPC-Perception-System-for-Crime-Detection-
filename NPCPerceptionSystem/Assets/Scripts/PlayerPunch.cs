@@ -12,6 +12,9 @@ public class PlayerPunch : MonoBehaviour
     [Header("Timing")]
     [SerializeField] private float punchCooldown = 0.35f;
 
+    [Header("Damage")]
+    [SerializeField] private float punchDamage = 25f;
+
     private float nextPunchTime;
 
     private void Awake()
@@ -55,13 +58,27 @@ public class PlayerPunch : MonoBehaviour
             return;
         }
 
+        bool anyPunchEffect = false;
+
+        ActorHealth health = hit.collider.GetComponentInParent<ActorHealth>();
+        if (health)
+        {
+            health.TakeDamage(punchDamage, gameObject);
+            anyPunchEffect = true;
+        }
+
         PunchHitReceiver receiver = hit.collider.GetComponentInParent<PunchHitReceiver>();
-        if (!receiver)
+        if (receiver && !(health && health.IsDead))
+        {
+            receiver.ReceivePunch(transform.position, transform);
+            anyPunchEffect = true;
+        }
+
+        if (!anyPunchEffect)
         {
             return;
         }
 
-        receiver.ReceivePunch(transform.position, transform);
         nextPunchTime = Time.time + punchCooldown;
     }
 

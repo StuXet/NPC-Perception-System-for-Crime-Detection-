@@ -53,6 +53,14 @@ MonoBehaviour:
   crimeArrivalTolerance: 1.75
   chasePathRefreshInterval: 0.2
   arrestDistance: 1.8
+  investigationDurationSeconds: 20
+  investigatePointInterval: 1
+  investigationViewDistance: 14
+  investigationViewAngle: 100
+  investigationObstructionMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  playerTarget: {fileID: 0}
   bustedScreen: {fileID: 0}
   debugLogs: 1
 --- !u!33 &5320231529439861526

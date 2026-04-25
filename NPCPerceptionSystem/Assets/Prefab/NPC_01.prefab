@@ -9,6 +9,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1817795423622874651}
+  - component: {fileID: 2544675468621333766}
   - component: {fileID: 8701362313501478846}
   - component: {fileID: 6274507537983564859}
   - component: {fileID: 6783446981299341222}
@@ -41,6 +42,26 @@ Transform:
   - {fileID: 1607769646510556874}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: -90, z: 0}
+--- !u!114 &2544675468621333766
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2750478765713835941}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d45e8bc716c462048ac03d84e4b13a65, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  maxHealth: 100
+  currentHealth: 100
+  debugLogs: 1
+  deathImpulseForce: 2.5
+  deathTorqueForce: 3
+  deathLinearDamping: 2.5
+  deathAngularDamping: 5
+  toppleForceHeight: 1.1
 --- !u!114 &8701362313501478846
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -62,6 +83,7 @@ MonoBehaviour:
   reportAssaultToPolice: 1
   reportedCrimeType: 0
   crimeSoundRadius: 12
+  drawPunchSoundRadius: 1
 --- !u!114 &6274507537983564859
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -120,6 +142,8 @@ MonoBehaviour:
   moveToHeardCrime: 1
   hearingInvestigationDuration: 3
   hearingMoveStopDistance: 1.5
+  hearingInvestigateRadius: 3
+  hearingInvestigatePointInterval: 0.8
   debugLogs: 1
   drawGizmos: 1
 --- !u!33 &6398439344086583608
