@@ -46,6 +46,7 @@ public class PoliceUnit : MonoBehaviour
     private float nextInvestigatePointTime;
     private float investigationRadius;
     private CrimeType currentCrimeType;
+    private Transform reportingWitness;
     private bool arrestTriggered;
 
     private void Awake()
@@ -74,6 +75,7 @@ public class PoliceUnit : MonoBehaviour
         crimeLocation = reportedCrime.location;
         suspect = reportedCrime.suspect;
         currentCrimeType = reportedCrime.type;
+        reportingWitness = reportedCrime.reporter;
         investigationRadius = Mathf.Max(2f, reportedCrime.soundRadius);
         nextChasePathTime = 0f;
         arrestTriggered = false;
@@ -187,6 +189,11 @@ public class PoliceUnit : MonoBehaviour
         nextInvestigatePointTime = 0f;
         PickInvestigationPoint();
 
+        if (currentCrimeType == CrimeType.DeadBody && ParamedicDispatcher.Instance)
+        {
+            ParamedicDispatcher.Instance.DispatchToDeadBody(suspect);
+        }
+
         if (debugLogs)
         {
             Debug.Log($"[PoliceUnit] '{name}' investigating dead-body scene for {duration:0.##}s in radius {investigationRadius:0.##}.");
@@ -204,6 +211,19 @@ public class PoliceUnit : MonoBehaviour
             if (debugLogs)
             {
                 Debug.Log($"[PoliceUnit] '{name}' saw player in crime scene radius and assumes killer.");
+            }
+            return;
+        }
+
+        if (TryFindNpcSuspectInInvestigationRadius(out Transform npcSuspect))
+        {
+            suspect = npcSuspect;
+            state = UnitState.ChasingSuspect;
+            RefreshChaseDestination(true);
+
+            if (debugLogs)
+            {
+                Debug.Log($"[PoliceUnit] '{name}' did not find player and assumes NPC '{npcSuspect.name}' is the killer.");
             }
             return;
         }
@@ -274,6 +294,15 @@ public class PoliceUnit : MonoBehaviour
             Debug.Log($"[PoliceUnit] '{name}' arrested suspect '{(suspect ? suspect.name : "Unknown")}'.");
         }
 
+        bool arrestedPlayer = playerTarget && suspect && (suspect == playerTarget || suspect.IsChildOf(playerTarget));
+        if (!arrestedPlayer && suspect)
+        {
+            // Non-player suspect is removed from scene immediately on arrest.
+            Destroy(suspect.gameObject);
+            suspect = null;
+            return;
+        }
+
         if (bustedScreen)
         {
             bustedScreen.ShowBusted();
@@ -338,30 +367,91 @@ public class PoliceUnit : MonoBehaviour
             return false;
         }
 
+        if (!CanSeeTransformInInvestigation(player))
+        {
+            return false;
+        }
+
+        seenPlayer = player;
+        return true;
+    }
+
+    private bool TryFindNpcSuspectInInvestigationRadius(out Transform npcSuspect)
+    {
+        npcSuspect = null;
+
+        Collider[] nearby = Physics.OverlapSphere(crimeLocation, investigationRadius, ~0, QueryTriggerInteraction.Ignore);
+        for (int i = 0; i < nearby.Length; i++)
+        {
+            ActorHealth health = nearby[i].GetComponentInParent<ActorHealth>();
+            if (!health || health.IsDead)
+            {
+                continue;
+            }
+
+            Transform candidate = health.transform;
+            if (!candidate || candidate == transform)
+            {
+                continue;
+            }
+
+            if (playerTarget && (candidate == playerTarget || candidate.IsChildOf(playerTarget)))
+            {
+                continue;
+            }
+
+            if (reportingWitness && (candidate == reportingWitness || candidate.IsChildOf(reportingWitness)))
+            {
+                continue;
+            }
+
+            if (Vector3.Distance(candidate.position, crimeLocation) > investigationRadius)
+            {
+                continue;
+            }
+
+            if (!CanSeeTransformInInvestigation(candidate))
+            {
+                continue;
+            }
+
+            npcSuspect = candidate;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool CanSeeTransformInInvestigation(Transform target)
+    {
+        if (!target)
+        {
+            return false;
+        }
+
         Vector3 eye = transform.position + Vector3.up * 1.2f;
-        Vector3 toPlayer = player.position - eye;
-        float sqrDist = toPlayer.sqrMagnitude;
+        Vector3 toTarget = target.position - eye;
+        float sqrDist = toTarget.sqrMagnitude;
         if (sqrDist > investigationViewDistance * investigationViewDistance)
         {
             return false;
         }
 
-        float angle = Vector3.Angle(transform.forward, toPlayer.normalized);
+        float angle = Vector3.Angle(transform.forward, toTarget.normalized);
         if (angle > investigationViewAngle * 0.5f)
         {
             return false;
         }
 
         float dist = Mathf.Sqrt(sqrDist);
-        if (Physics.Raycast(eye, toPlayer.normalized, out RaycastHit hit, dist, investigationObstructionMask, QueryTriggerInteraction.Ignore))
+        if (Physics.Raycast(eye, toTarget.normalized, out RaycastHit hit, dist, investigationObstructionMask, QueryTriggerInteraction.Ignore))
         {
-            if (hit.transform != player && !hit.transform.IsChildOf(player))
+            if (hit.transform != target && !hit.transform.IsChildOf(target))
             {
                 return false;
             }
         }
 
-        seenPlayer = player;
         return true;
     }
 

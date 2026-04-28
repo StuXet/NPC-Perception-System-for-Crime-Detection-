@@ -22,10 +22,14 @@ public class ActorHealth : MonoBehaviour
     [SerializeField] private bool emitDeadBodyCrime = true;
     [SerializeField] private float deadBodyCrimeRadius = 12f;
 
+    [Header("Revive")]
+    [SerializeField] private bool reviveToFullHealth = true;
+
     public float MaxHealth => maxHealth;
     public float CurrentHealth => currentHealth;
     public bool IsDead => currentHealth <= 0f;
     private bool hasDied;
+    private bool createdRigidbodyOnDeath;
 
     private void Awake()
     {
@@ -123,6 +127,11 @@ public class ActorHealth : MonoBehaviour
         if (!rb)
         {
             rb = gameObject.AddComponent<Rigidbody>();
+            createdRigidbodyOnDeath = true;
+        }
+        else
+        {
+            createdRigidbodyOnDeath = false;
         }
 
         rb.isKinematic = false;
@@ -135,12 +144,70 @@ public class ActorHealth : MonoBehaviour
         ApplyDeathImpulseAndTorque(rb, source);
     }
 
+    public void Revive()
+    {
+        if (!hasDied && currentHealth > 0f)
+        {
+            return;
+        }
+
+        hasDied = false;
+        currentHealth = reviveToFullHealth ? maxHealth : Mathf.Max(1f, maxHealth * 0.5f);
+
+        if (debugLogs)
+        {
+            Debug.Log($"[Health] '{name}' has been revived. HP: {currentHealth:0.##}/{maxHealth:0.##}");
+        }
+
+        // Re-enable gameplay behaviours.
+        EnableBehaviourIfPresent<NPCWander>();
+        EnableBehaviourIfPresent<NPCPerception>();
+        EnableBehaviourIfPresent<NPCPoliceCallCountdown>();
+        EnableBehaviourIfPresent<PunchHitReceiver>();
+        EnableBehaviourIfPresent<PoliceUnit>();
+
+        NavMeshAgent navAgent = GetComponent<NavMeshAgent>();
+        if (navAgent)
+        {
+            navAgent.enabled = true;
+            navAgent.Warp(transform.position);
+            navAgent.isStopped = false;
+        }
+
+        Rigidbody rb = GetComponent<Rigidbody>();
+        if (rb)
+        {
+            if (createdRigidbodyOnDeath)
+            {
+                Destroy(rb);
+                createdRigidbodyOnDeath = false;
+            }
+            else
+            {
+                rb.velocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+                rb.isKinematic = true;
+                rb.useGravity = false;
+                rb.constraints = RigidbodyConstraints.FreezeRotation;
+            }
+        }
+    }
+
     private void DisableBehaviourIfPresent<T>() where T : Behaviour
     {
         T component = GetComponent<T>();
         if (component)
         {
             component.enabled = false;
+        }
+    }
+
+    private void EnableBehaviourIfPresent<T>() where T : Behaviour
+    {
+        T component = GetComponent<T>();
+        if (component)
+        {
+            component.enabled = true;
         }
     }
 
