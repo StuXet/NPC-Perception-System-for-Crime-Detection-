@@ -6,6 +6,9 @@ using UnityEngine.AI;
 [DisallowMultipleComponent]
 public class NPCPerception : MonoBehaviour
 {
+    private const float RotationStopAngle = 1f;
+    private const float MinFlatDirectionSqrMagnitude = 0.0001f;
+
     [Header("Target")]
     [SerializeField] private Transform target;
 
@@ -258,8 +261,7 @@ public class NPCPerception : MonoBehaviour
                     yield break;
                 }
 
-                bool arrived = !navAgent.pathPending &&
-                               (!navAgent.hasPath || navAgent.remainingDistance <= hearingMoveStopDistance);
+                bool arrived = HasReachedHearingStopDistance();
                 if (arrived && Time.time >= nextInvestigatePointTime)
                 {
                     SetRandomInvestigationPoint(committedCrime.location);
@@ -330,20 +332,10 @@ public class NPCPerception : MonoBehaviour
         try
         {
             // Flatten Y so we only rotate on the ground plane.
-            Vector3 flatDirection = committedCrime.location - transform.position;
-            flatDirection.y = 0f;
-
-            if (flatDirection.sqrMagnitude > 0.0001f)
+            Vector3 flatDirection = GetFlatDirectionFromTransformTo(committedCrime.location);
+            if (flatDirection.sqrMagnitude > MinFlatDirectionSqrMagnitude)
             {
-                Quaternion targetRotation = Quaternion.LookRotation(flatDirection.normalized);
-                float maxStepPerFrame = lookTurnSpeed * Time.deltaTime;
-
-                while (Quaternion.Angle(transform.rotation, targetRotation) > 1f)
-                {
-                    transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, maxStepPerFrame);
-                    yield return null;
-                    maxStepPerFrame = lookTurnSpeed * Time.deltaTime;
-                }
+                yield return RotateTowardsFlatDirection(flatDirection);
             }
 
             if (lookCheckDelay > 0f)
@@ -401,9 +393,8 @@ public class NPCPerception : MonoBehaviour
             yield break;
         }
 
-        Vector3 flatDirection = reportTarget.position - transform.position;
-        flatDirection.y = 0f;
-        if (flatDirection.sqrMagnitude <= 0.0001f)
+        Vector3 flatDirection = GetFlatDirectionFromTransformTo(reportTarget.position);
+        if (flatDirection.sqrMagnitude <= MinFlatDirectionSqrMagnitude)
         {
             yield break;
         }
@@ -415,13 +406,7 @@ public class NPCPerception : MonoBehaviour
 
         try
         {
-            Quaternion targetRotation = Quaternion.LookRotation(flatDirection.normalized);
-            while (Quaternion.Angle(transform.rotation, targetRotation) > 1f)
-            {
-                float step = lookTurnSpeed * Time.deltaTime;
-                transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, step);
-                yield return null;
-            }
+            yield return RotateTowardsFlatDirection(flatDirection);
         }
         finally
         {
@@ -434,9 +419,8 @@ public class NPCPerception : MonoBehaviour
 
     private IEnumerator RotateTowardsPointBeforeReport(Vector3 reportPoint)
     {
-        Vector3 flatDirection = reportPoint - transform.position;
-        flatDirection.y = 0f;
-        if (flatDirection.sqrMagnitude <= 0.0001f)
+        Vector3 flatDirection = GetFlatDirectionFromTransformTo(reportPoint);
+        if (flatDirection.sqrMagnitude <= MinFlatDirectionSqrMagnitude)
         {
             yield break;
         }
@@ -448,13 +432,7 @@ public class NPCPerception : MonoBehaviour
 
         try
         {
-            Quaternion targetRotation = Quaternion.LookRotation(flatDirection.normalized);
-            while (Quaternion.Angle(transform.rotation, targetRotation) > 1f)
-            {
-                float step = lookTurnSpeed * Time.deltaTime;
-                transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, step);
-                yield return null;
-            }
+            yield return RotateTowardsFlatDirection(flatDirection);
         }
         finally
         {
@@ -659,6 +637,34 @@ public class NPCPerception : MonoBehaviour
             {
                 Debug.Log($"[NPCPerception] '{name}' visually discovered dead body '{bodyTransform.name}' while scanning.");
             }
+        }
+    }
+
+    private bool HasReachedHearingStopDistance()
+    {
+        return !navAgent.pathPending && (!navAgent.hasPath || navAgent.remainingDistance <= hearingMoveStopDistance);
+    }
+
+    private Vector3 GetFlatDirectionFromTransformTo(Vector3 worldPoint)
+    {
+        Vector3 flatDirection = worldPoint - transform.position;
+        flatDirection.y = 0f;
+        return flatDirection;
+    }
+
+    private IEnumerator RotateTowardsFlatDirection(Vector3 flatDirection)
+    {
+        if (flatDirection.sqrMagnitude <= MinFlatDirectionSqrMagnitude)
+        {
+            yield break;
+        }
+
+        Quaternion targetRotation = Quaternion.LookRotation(flatDirection.normalized);
+        while (Quaternion.Angle(transform.rotation, targetRotation) > RotationStopAngle)
+        {
+            float step = lookTurnSpeed * Time.deltaTime;
+            transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, step);
+            yield return null;
         }
     }
 

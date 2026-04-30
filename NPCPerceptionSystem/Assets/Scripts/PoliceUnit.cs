@@ -5,6 +5,8 @@ using UnityEngine.AI;
 [RequireComponent(typeof(NavMeshAgent))]
 public class PoliceUnit : MonoBehaviour
 {
+    private const float InvestigationEyeHeight = 1.2f;
+
     private enum UnitState
     {
         Idle,
@@ -141,7 +143,7 @@ public class PoliceUnit : MonoBehaviour
 
         float dist = Vector3.Distance(transform.position, crimeLocation);
         bool closeEnough = dist <= crimeArrivalTolerance;
-        bool navSaysArrived = agent.remainingDistance <= agent.stoppingDistance;
+        bool navSaysArrived = HasArrived(agent.stoppingDistance);
 
         if (!closeEnough && !navSaysArrived)
         {
@@ -162,22 +164,11 @@ public class PoliceUnit : MonoBehaviour
         if (suspect)
         {
             // We made it to the scene and still know who to chase.
-            state = UnitState.ChasingSuspect;
-            RefreshChaseDestination(true);
-
-            if (debugLogs)
-            {
-                Debug.Log($"[PoliceUnit] '{name}' chasing suspect '{suspect.name}'.");
-            }
+            TransitionToChase(suspect, $"[PoliceUnit] '{name}' chasing suspect '{suspect.name}'.");
         }
         else
         {
-            state = UnitState.Idle;
-
-            if (debugLogs)
-            {
-                Debug.Log($"[PoliceUnit] '{name}' no suspect to chase; holding position.");
-            }
+            TransitionToIdle($"[PoliceUnit] '{name}' no suspect to chase; holding position.");
         }
     }
 
@@ -204,43 +195,26 @@ public class PoliceUnit : MonoBehaviour
     {
         if (CanSeePlayerInInvestigationRadius(out Transform seenPlayer))
         {
-            suspect = seenPlayer;
-            state = UnitState.ChasingSuspect;
-            RefreshChaseDestination(true);
-
-            if (debugLogs)
-            {
-                Debug.Log($"[PoliceUnit] '{name}' saw player in crime scene radius and assumes killer.");
-            }
+            TransitionToChase(seenPlayer, $"[PoliceUnit] '{name}' saw player in crime scene radius and assumes killer.");
             return;
         }
 
         if (TryFindNpcSuspectInInvestigationRadius(out Transform npcSuspect))
         {
-            suspect = npcSuspect;
-            state = UnitState.ChasingSuspect;
-            RefreshChaseDestination(true);
-
-            if (debugLogs)
-            {
-                Debug.Log($"[PoliceUnit] '{name}' did not find player and assumes NPC '{npcSuspect.name}' is the killer.");
-            }
+            TransitionToChase(
+                npcSuspect,
+                $"[PoliceUnit] '{name}' did not find player and assumes NPC '{npcSuspect.name}' is the killer."
+            );
             return;
         }
 
         if (Time.time >= investigationEndTime)
         {
-            state = UnitState.Idle;
-            agent.ResetPath();
-
-            if (debugLogs)
-            {
-                Debug.Log($"[PoliceUnit] '{name}' finished investigation without identifying killer.");
-            }
+            TransitionToIdle($"[PoliceUnit] '{name}' finished investigation without identifying killer.");
             return;
         }
 
-        bool arrived = !agent.pathPending && (!agent.hasPath || agent.remainingDistance <= agent.stoppingDistance);
+        bool arrived = HasArrived(agent.stoppingDistance);
         if (arrived && Time.time >= nextInvestigatePointTime)
         {
             PickInvestigationPoint();
@@ -255,12 +229,7 @@ public class PoliceUnit : MonoBehaviour
         if (!suspect)
         {
             // Suspect reference can disappear if the object is disabled/destroyed.
-            state = UnitState.Idle;
-
-            if (debugLogs)
-            {
-                Debug.Log($"[PoliceUnit] '{name}' lost suspect reference; stopping chase.");
-            }
+            TransitionToIdle($"[PoliceUnit] '{name}' lost suspect reference; stopping chase.");
             return;
         }
 
@@ -362,7 +331,7 @@ public class PoliceUnit : MonoBehaviour
         }
 
         // Player must be inside crime-scene radius to be assumed killer during this phase.
-        if (Vector3.Distance(player.position, crimeLocation) > investigationRadius)
+        if (!IsWithinInvestigationRadius(player.position))
         {
             return false;
         }
@@ -395,7 +364,7 @@ public class PoliceUnit : MonoBehaviour
                 continue;
             }
 
-            if (playerTarget && (candidate == playerTarget || candidate.IsChildOf(playerTarget)))
+            if (IsPlayerTransform(candidate))
             {
                 continue;
             }
@@ -405,7 +374,7 @@ public class PoliceUnit : MonoBehaviour
                 continue;
             }
 
-            if (Vector3.Distance(candidate.position, crimeLocation) > investigationRadius)
+            if (!IsWithinInvestigationRadius(candidate.position))
             {
                 continue;
             }
@@ -429,7 +398,7 @@ public class PoliceUnit : MonoBehaviour
             return false;
         }
 
-        Vector3 eye = transform.position + Vector3.up * 1.2f;
+        Vector3 eye = GetInvestigationEyePosition();
         Vector3 toTarget = target.position - eye;
         float sqrDist = toTarget.sqrMagnitude;
         if (sqrDist > investigationViewDistance * investigationViewDistance)
@@ -455,6 +424,49 @@ public class PoliceUnit : MonoBehaviour
         return true;
     }
 
+    private bool HasArrived(float stopDistance)
+    {
+        return !agent.pathPending && (!agent.hasPath || agent.remainingDistance <= stopDistance);
+    }
+
+    private Vector3 GetInvestigationEyePosition()
+    {
+        return transform.position + Vector3.up * InvestigationEyeHeight;
+    }
+
+    private bool IsWithinInvestigationRadius(Vector3 worldPosition)
+    {
+        return Vector3.Distance(worldPosition, crimeLocation) <= investigationRadius;
+    }
+
+    private bool IsPlayerTransform(Transform candidate)
+    {
+        return playerTarget && (candidate == playerTarget || candidate.IsChildOf(playerTarget));
+    }
+
+    private void TransitionToChase(Transform chaseTarget, string debugMessage)
+    {
+        suspect = chaseTarget;
+        state = UnitState.ChasingSuspect;
+        RefreshChaseDestination(true);
+
+        if (debugLogs)
+        {
+            Debug.Log(debugMessage);
+        }
+    }
+
+    private void TransitionToIdle(string debugMessage)
+    {
+        state = UnitState.Idle;
+        agent.ResetPath();
+
+        if (debugLogs)
+        {
+            Debug.Log(debugMessage);
+        }
+    }
+
     private void OnDrawGizmosSelected()
     {
         if (!drawGizmos)
@@ -462,7 +474,7 @@ public class PoliceUnit : MonoBehaviour
             return;
         }
 
-        Vector3 eye = transform.position + Vector3.up * 1.2f;
+        Vector3 eye = GetInvestigationEyePosition();
         float halfFov = investigationViewAngle * 0.5f;
 
         // Police investigation vision range.
