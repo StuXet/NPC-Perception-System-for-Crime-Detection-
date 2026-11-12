@@ -466,8 +466,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   paramedicPrefab: {fileID: 2001985047592868478, guid: bdee15083673a03499b533a65d66e7c1, type: 3}
   spawnPoint: {fileID: 153694277}
-  spawnNewUnitPerDispatch: 0
+  maxUnits: 1
   debugLogs: 1
+  gizmoMode: 1
+  units: []
+  queuedBodies: []
 --- !u!4 &153694277
 Transform:
   m_ObjectHideFlags: 0
@@ -627,7 +630,6 @@ GameObject:
   m_Component:
   - component: {fileID: 487910906}
   - component: {fileID: 487910905}
-  - component: {fileID: 487910907}
   m_Layer: 0
   m_Name: PoliceDispatcher
   m_TagString: Untagged
@@ -649,8 +651,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   policePrefab: {fileID: 1982641621760323776, guid: 70ef66c456855c2468b2c82dcf9c5273, type: 3}
   spawnPoint: {fileID: 487910906}
-  spawnNewUnitPerReport: 0
+  maxUnits: 1
+  allowPriorityOverride: 1
   debugLogs: 1
+  gizmoMode: 1
+  units: []
+  queuedCrimes: []
 --- !u!4 &487910906
 Transform:
   m_ObjectHideFlags: 0
@@ -666,21 +672,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &487910907
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 487910904}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 80bbe88c31d14724889f604a4ce06162, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  drawDebugMarker: 1
-  markerLifetime: 6
-  markerScale: 0.4
 --- !u!1001 &595200459
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -999,9 +990,18 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 80bbe88c31d14724889f604a4ce06162, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  assaultMergeWindow: 8
+  assaultMergeRadius: 6
+  maxResolvedIncidentsKept: 30
   drawDebugMarker: 1
   markerLifetime: 6
   markerScale: 0.4
+  debugLogs: 1
+  createDebugHud: 1
+  gizmoMode: 2
+  drawResolvedIncidents: 0
+  openIncidentCount: 0
+  incidents: []
 --- !u!4 &846490893
 Transform:
   m_ObjectHideFlags: 0
