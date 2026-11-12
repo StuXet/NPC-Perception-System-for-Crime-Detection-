@@ -13,22 +13,25 @@ public class PunchHitReceiver : MonoBehaviour
     }
 
     [Header("Knockback")]
-    [SerializeField] private float knockbackDistance = 1.2f;
-    [SerializeField] private float knockbackDuration = 0.12f;
+    [Tooltip("How far the NPC is pushed away from the attacker.")]
+    [SerializeField, Min(0f)] private float knockbackDistance = 1.2f;
+    [SerializeField, Min(0f)] private float knockbackDuration = 0.12f;
 
     [Header("Face punch direction (after knockback)")]
     [Tooltip("After being hit, NPC turns toward the player / direction the punch came from.")]
-    [SerializeField] private float faceTurnSpeed = 240f;
-    [SerializeField] private float faceAngleThreshold = 1.5f;
+    [SerializeField, Min(1f)] private float faceTurnSpeed = 240f;
+    [SerializeField, Min(0f)] private float faceAngleThreshold = 1.5f;
 
     [Header("Visual")]
     [SerializeField] private Color hitColor = Color.red;
-    [SerializeField] private float flashDurationSeconds = 0.1f;
+    [SerializeField, Min(0f)] private float flashDurationSeconds = 0.1f;
 
     [Header("Crime")]
+    [Tooltip("The victim commits an assault crime (heard by nearby NPCs) and calls the police about it.")]
     [SerializeField] private bool reportAssaultToPolice = true;
     [SerializeField] private CrimeType reportedCrimeType = CrimeType.Assault;
-    [SerializeField] private float crimeSoundRadius = 12f;
+    [Tooltip("How far the fight can be heard.")]
+    [SerializeField, Min(0f)] private float crimeSoundRadius = 12f;
     [SerializeField] private bool drawPunchSoundRadius = true;
 
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
@@ -38,6 +41,11 @@ public class PunchHitReceiver : MonoBehaviour
     private Coroutine activeRoutine;
     private NPCPoliceCallCountdown policeCallCountdown;
     private ActorHealth actorHealth;
+
+    private Renderer[] renderers;
+    private MaterialPropertyBlock[] blocks;
+    private ColorProp[] prop;
+    private Color[] originals;
 
     private void Awake()
     {
@@ -104,13 +112,17 @@ public class PunchHitReceiver : MonoBehaviour
 
         if (reportAssaultToPolice && attacker && CrimeManager.Instance != null)
         {
-            CrimeEvent crime = new CrimeEvent(transform.position, reportedCrimeType, attacker, crimeSoundRadius, directPolicePursuit: true);
-            CrimeManager.Instance.CommitCrime(crime);
+            // The victim saw their attacker, so the report carries a direct sighting.
+            var crime = new CrimeEvent(transform.position, reportedCrimeType, attacker, crimeSoundRadius,
+                directPolicePursuit: true, victim: transform);
+            crime.reason = DetectionReason.Victim;
+            crime.SetSuspectSighting(attacker.position);
+            crime = CrimeManager.Instance.CommitCrime(crime);
 
-            if (policeCallCountdown)
+            if (policeCallCountdown && policeCallCountdown.isActiveAndEnabled)
             {
                 // Getting punched resets this witness timer instead of firing duplicate calls.
-                policeCallCountdown.SchedulePoliceCall(crime, "Punched — timer reset");
+                policeCallCountdown.SchedulePoliceCall(crime, "Punched - timer reset");
             }
             else
             {
@@ -128,8 +140,9 @@ public class PunchHitReceiver : MonoBehaviour
             return;
         }
 
-        Gizmos.color = new Color(1f, 0.45f, 0f, 0.95f);
-        Gizmos.DrawWireSphere(transform.position, crimeSoundRadius);
+        Vector3 ground = transform.position + Vector3.up * 0.05f;
+        CrimeDebugDraw.Circle(ground, crimeSoundRadius, new Color(1f, 0.45f, 0f, 0.95f), 2f);
+        CrimeDebugDraw.Label(ground + Vector3.forward * crimeSoundRadius, $"fight noise {crimeSoundRadius:0.#}m", new Color(1f, 0.45f, 0f, 1f));
     }
 
     private IEnumerator SmoothRotateTowardsHorizontal(Vector3 worldTarget)
@@ -143,7 +156,8 @@ public class PunchHitReceiver : MonoBehaviour
 
         Quaternion targetRotation = Quaternion.LookRotation(flat.normalized);
 
-        if (navAgent)
+        bool agentReady = navAgent && navAgent.enabled && navAgent.isOnNavMesh;
+        if (agentReady)
         {
             navAgent.isStopped = true;
         }
@@ -161,7 +175,7 @@ public class PunchHitReceiver : MonoBehaviour
         }
         finally
         {
-            if (navAgent)
+            if (navAgent && navAgent.enabled && navAgent.isOnNavMesh)
             {
                 navAgent.isStopped = false;
             }
@@ -178,7 +192,7 @@ public class PunchHitReceiver : MonoBehaviour
         if (navAgent)
         {
             // Temporarily disable NavMeshAgent so manual knockback movement doesn't fight pathfinding.
-            navAgent.isStopped = true;
+            if (navAgent.enabled && navAgent.isOnNavMesh) navAgent.isStopped = true;
             navAgent.enabled = false;
         }
 
@@ -221,14 +235,27 @@ public class PunchHitReceiver : MonoBehaviour
     /// </summary>
     private IEnumerator FlashRedRoutine()
     {
-        var renderers = GetComponentsInChildren<Renderer>();
-        var blocks = new MaterialPropertyBlock[renderers.Length];
-        var prop = new ColorProp[renderers.Length];
-        var originals = new Color[renderers.Length];
+        // Cached once per NPC instead of allocating arrays on every punch.
+        if (renderers == null)
+        {
+            renderers = GetComponentsInChildren<Renderer>();
+            blocks = new MaterialPropertyBlock[renderers.Length];
+            prop = new ColorProp[renderers.Length];
+            originals = new Color[renderers.Length];
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                blocks[i] = new MaterialPropertyBlock();
+            }
+        }
 
         for (int i = 0; i < renderers.Length; i++)
         {
-            blocks[i] = new MaterialPropertyBlock();
+            if (!renderers[i])
+            {
+                prop[i] = ColorProp.None;
+                continue;
+            }
+
             renderers[i].GetPropertyBlock(blocks[i]);
 
             Material mat = renderers[i].sharedMaterial;

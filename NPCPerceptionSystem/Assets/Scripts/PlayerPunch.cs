@@ -4,16 +4,19 @@ using UnityEngine;
 public class PlayerPunch : MonoBehaviour
 {
     [Header("Raycast")]
+    [Tooltip("Camera the punch ray is cast from (screen center). Auto-found in children if empty.")]
     [SerializeField] private Camera punchCamera;
-    [SerializeField] private float punchRange = 2.5f;
+    [SerializeField, Min(0.1f)] private float punchRange = 2.5f;
     [SerializeField] private LayerMask hitMask = ~0;
     [SerializeField] private bool drawPunchRayGizmo = true;
 
     [Header("Timing")]
-    [SerializeField] private float punchCooldown = 0.35f;
+    [Tooltip("Seconds between punches that connect.")]
+    [SerializeField, Min(0f)] private float punchCooldown = 0.35f;
 
     [Header("Damage")]
-    [SerializeField] private float punchDamage = 25f;
+    [Tooltip("Damage per punch. 100 HP NPCs die on the 4th hit at 25.")]
+    [SerializeField, Min(0f)] private float punchDamage = 25f;
 
     private float nextPunchTime;
 

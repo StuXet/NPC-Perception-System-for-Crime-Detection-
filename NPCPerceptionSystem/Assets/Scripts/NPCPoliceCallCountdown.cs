@@ -1,27 +1,43 @@
 using System.Collections;
 using UnityEngine;
 
-
+/// <summary>
+/// Simulates the time it takes a witness to call the police.
+/// New information restarts the countdown; the most serious crime seen so far is the one that gets reported.
+/// </summary>
 [DisallowMultipleComponent]
 public class NPCPoliceCallCountdown : MonoBehaviour
 {
-    [SerializeField] private float callDelaySeconds = 5f;
+    [Tooltip("Seconds between witnessing something and the call reaching the police.")]
+    [SerializeField, Min(0f)] private float callDelaySeconds = 5f;
+
+    [Tooltip("Restart the countdown whenever new information arrives (e.g. punched again).")]
+    [SerializeField] private bool restartOnNewInfo = true;
 
     [Header("Debug")]
     [SerializeField] private bool debugLogs = true;
 
+    [Header("Runtime (read only)")]
+    [ReadOnly, SerializeField] private bool isCalling;
+    [ReadOnly, SerializeField] private float timeRemaining;
+    [ReadOnly, SerializeField] private CrimeType pendingType;
+    [ReadOnly, SerializeField] private string pendingReason = string.Empty;
+
     private Coroutine countdownRoutine;
     private CrimeEvent pendingCrime;
-    private string pendingReason = string.Empty;
+    private float callTime;
     private ActorHealth cachedHealth;
+    private NPCPerception perception;
+
+    public bool IsCalling => countdownRoutine != null;
+    public float TimeRemaining => IsCalling ? Mathf.Max(0f, callTime - Time.time) : 0f;
+    public float CallDelaySeconds => callDelaySeconds;
+    public CrimeType PendingType => pendingCrime.type;
 
     private void Awake()
     {
-        cachedHealth = GetComponent<ActorHealth>();
-        if (!cachedHealth)
-        {
-            cachedHealth = GetComponentInParent<ActorHealth>();
-        }
+        cachedHealth = GetComponentInParent<ActorHealth>();
+        perception = GetComponent<NPCPerception>();
     }
 
     private void OnDisable()
@@ -29,30 +45,52 @@ public class NPCPoliceCallCountdown : MonoBehaviour
         CancelPendingCall();
     }
 
+    private void Update()
+    {
+        isCalling = IsCalling;
+        timeRemaining = TimeRemaining;
+    }
+
     /// <summary>
-    /// Stores latest crime payload and (re)starts delayed report timer so repeated events reset the countdown.
+    /// Stores the crime payload and (re)starts the delayed report timer.
+    /// A less serious crime never replaces a more serious pending one.
     /// </summary>
     public void SchedulePoliceCall(CrimeEvent crime, string reason = "")
     {
-        if (cachedHealth && cachedHealth.IsDead)
+        if (!isActiveAndEnabled || (cachedHealth && cachedHealth.IsDead))
         {
             return;
         }
 
-        pendingCrime = crime;
-        pendingReason = reason;
+        bool replacePending = !IsCalling || crime.Priority >= pendingCrime.Priority;
+        if (replacePending)
+        {
+            pendingCrime = crime;
+            pendingReason = reason;
+            pendingType = crime.type;
+        }
+        else if (crime.hasSuspectLastKnownPosition && crime.suspect == pendingCrime.suspect)
+        {
+            // Keep the serious crime but take the fresher suspect position.
+            pendingCrime.SetSuspectSighting(crime.suspectLastKnownPosition);
+        }
+
+        if (IsCalling && !restartOnNewInfo)
+        {
+            return;
+        }
 
         if (countdownRoutine != null)
         {
-            // Any new witness update restarts the countdown from zero.
             StopCoroutine(countdownRoutine);
         }
 
+        callTime = Time.time + callDelaySeconds;
         countdownRoutine = StartCoroutine(CountdownRoutine());
 
         if (debugLogs)
         {
-            Debug.Log($"[NPCPoliceCallCountdown] '{name}' police call scheduled in {callDelaySeconds}s (reset). {reason}");
+            Debug.Log($"[NPCPoliceCallCountdown] '{name}' calling police in {callDelaySeconds:0.#}s about {pendingCrime.type}. {reason}", this);
         }
     }
 
@@ -66,16 +104,26 @@ public class NPCPoliceCallCountdown : MonoBehaviour
     }
 
     /// <summary>
-    /// Waits configured delay, reports pending crime, then notifies perception cooldown state.
+    /// Waits the configured delay, reports the pending crime, then notifies perception so the NPC can move on.
     /// </summary>
     private IEnumerator CountdownRoutine()
     {
-        yield return new WaitForSeconds(callDelaySeconds);
+        while (Time.time < callTime)
+        {
+            yield return null;
+        }
+
+        countdownRoutine = null;
 
         if (cachedHealth && cachedHealth.IsDead)
         {
-            countdownRoutine = null;
             yield break;
+        }
+
+        // If the witness still sees the suspect, the operator gets a fresh position.
+        if (perception)
+        {
+            perception.TryRefreshSuspectSighting(ref pendingCrime);
         }
 
         if (CrimeManager.Instance != null)
@@ -84,12 +132,13 @@ public class NPCPoliceCallCountdown : MonoBehaviour
 
             if (debugLogs)
             {
-                Debug.Log($"[NPCPoliceCallCountdown] '{name}' called police: {pendingCrime.type}. {pendingReason}");
+                Debug.Log($"[NPCPoliceCallCountdown] '{name}' called police: {pendingCrime.type}. {pendingReason}", this);
             }
         }
 
-        GetComponent<NPCPerception>()?.NotifyReportSentToPolice();
-
-        countdownRoutine = null;
+        if (perception)
+        {
+            perception.NotifyReportSentToPolice();
+        }
     }
 }

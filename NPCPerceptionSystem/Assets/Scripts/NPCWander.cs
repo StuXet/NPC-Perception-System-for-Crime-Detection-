@@ -1,7 +1,10 @@
 using UnityEngine;
 using UnityEngine.AI;
 
-
+/// <summary>
+/// Simple ambient wandering around a home point. Pauses while the NPC's perception is investigating or reporting,
+/// so the two systems never fight over the NavMeshAgent destination.
+/// </summary>
 [DisallowMultipleComponent]
 [RequireComponent(typeof(NavMeshAgent))]
 public class NPCWander : MonoBehaviour
@@ -9,36 +12,50 @@ public class NPCWander : MonoBehaviour
     private enum WanderState
     {
         Idle,
-        Moving
+        Moving,
+        Paused
     }
 
     [Header("Wander")]
-    [SerializeField] private float wanderRadius = 8f;
-    [SerializeField] private float minIdleTime = 0.5f;
-    [SerializeField] private float maxIdleTime = 2f;
-    [SerializeField] private int sampleAttempts = 12;
+    [Tooltip("Random destinations are picked within this radius of the home position (start position).")]
+    [SerializeField, Min(0.5f)] private float wanderRadius = 8f;
+    [SerializeField, Min(0f)] private float minIdleTime = 0.5f;
+    [SerializeField, Min(0f)] private float maxIdleTime = 2f;
+    [Tooltip("How many random points to try before giving up for this cycle.")]
+    [SerializeField, Min(1)] private int sampleAttempts = 12;
 
     [Header("Debug")]
     [SerializeField] private bool debugLogs;
+    [SerializeField] private GizmoDrawMode gizmoMode = GizmoDrawMode.Selected;
+
+    [Header("Runtime (read only)")]
+    [ReadOnly, SerializeField] private WanderState state = WanderState.Idle;
 
     private NavMeshAgent agent;
+    private NPCPerception perception;
     private Vector3 homePosition;
-    private WanderState state = WanderState.Idle;
+    private bool homeSet;
     private float idleUntil;
 
     private void Awake()
     {
         agent = GetComponent<NavMeshAgent>();
+        perception = GetComponent<NPCPerception>();
     }
 
     private void Start()
     {
-        homePosition = transform.position;
+        if (!homeSet)
+        {
+            homePosition = transform.position;
+            homeSet = true;
+        }
+
         idleUntil = 0f;
     }
 
     /// <summary>
-    /// Simple wander state machine: wait while idle, move to sampled points, then idle again on arrival.
+    /// Wait while idle, move to sampled points, idle again on arrival. Yields to perception while it is busy.
     /// </summary>
     private void Update()
     {
@@ -47,12 +64,21 @@ public class NPCWander : MonoBehaviour
             return;
         }
 
-        if (agent.isStopped)
+        if (perception && perception.isActiveAndEnabled && perception.IsBusy)
         {
+            state = WanderState.Paused;
             return;
         }
 
-        if (agent.pathPending)
+        if (state == WanderState.Paused)
+        {
+            // Perception just finished: take a short breather before wandering again.
+            state = WanderState.Idle;
+            idleUntil = Time.time + Random.Range(minIdleTime, maxIdleTime);
+            return;
+        }
+
+        if (agent.isStopped || agent.pathPending)
         {
             return;
         }
@@ -98,25 +124,44 @@ public class NPCWander : MonoBehaviour
 
             if (NavMesh.SamplePosition(candidate, out NavMeshHit hit, wanderRadius, NavMesh.AllAreas))
             {
-                // Use the first valid sampled point instead of over-optimizing path quality.
                 bool ok = agent.SetDestination(hit.position);
                 if (debugLogs)
                 {
-                    Debug.Log($"[NPCWander] '{name}' wandering to {hit.position} (set={ok}).");
+                    Debug.Log($"[NPCWander] '{name}' wandering to {hit.position} (set={ok}).", this);
                 }
+
                 return ok;
             }
         }
 
         if (debugLogs)
         {
-            Debug.LogWarning($"[NPCWander] '{name}' could not find NavMesh point near {homePosition}.");
+            Debug.LogWarning($"[NPCWander] '{name}' could not find NavMesh point near {homePosition}.", this);
         }
+
         return false;
     }
 
     public void SetHomePosition(Vector3 worldPosition)
     {
         homePosition = worldPosition;
+        homeSet = true;
+    }
+
+    private void OnDrawGizmos()
+    {
+        if (gizmoMode == GizmoDrawMode.Always) DrawWanderGizmos();
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        if (gizmoMode == GizmoDrawMode.Selected) DrawWanderGizmos();
+    }
+
+    private void DrawWanderGizmos()
+    {
+        Vector3 home = Application.isPlaying && homeSet ? homePosition : transform.position;
+        CrimeDebugDraw.Circle(home + Vector3.up * 0.05f, wanderRadius, new Color(0.6f, 0.9f, 0.6f, 0.5f));
+        CrimeDebugDraw.Marker(home + Vector3.up * 0.2f, new Color(0.6f, 0.9f, 0.6f, 0.9f), 0.2f);
     }
 }
